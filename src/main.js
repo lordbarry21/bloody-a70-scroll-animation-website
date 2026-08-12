@@ -5,10 +5,14 @@ import './style.css';
 gsap.registerPlugin(ScrollTrigger);
 
 // ----------------------------------------------------
-// 1. ASSET PRELOADER (299 FRAMES)
+// 1. PROGRESSIVE ASSET PRELOADER (INSTANT SUB-SECOND LOAD)
 // ----------------------------------------------------
 const TOTAL_FRAMES = 299;
-const images = [];
+const INITIAL_KEYFRAME_STEP = 5; // Priority load keyframes (0, 5, 10, 15...)
+const MIN_FRAMES_TO_START = 15;  // Reveal page immediately when 15 keyframes are ready (~1 sec)
+const CONCURRENT_DOWNLOADS = 8;   // 8 parallel HTTP streams
+
+const images = new Array(TOTAL_FRAMES);
 const frameObj = { frame: 0 };
 
 const loaderBar = document.getElementById('loader-bar');
@@ -19,10 +23,23 @@ const preloader = document.getElementById('preloader');
 const canvas = document.getElementById('hero-canvas');
 const ctx = canvas.getContext('2d');
 
-// Helper to construct frame URL
 function currentFrameUrl(index) {
   const paddedNum = String(index + 1).padStart(4, '0');
   return `./bloody_mouse_30fps_4k_ultra_sharp/frame_${paddedNum}.jpg`;
+}
+
+// Fallback to nearest loaded frame so canvas never flickers or goes blank
+function getBestLoadedImage(targetIndex) {
+  if (images[targetIndex] && images[targetIndex].complete && images[targetIndex].naturalWidth > 0) {
+    return images[targetIndex];
+  }
+  for (let offset = 1; offset < TOTAL_FRAMES; offset++) {
+    const left = targetIndex - offset;
+    const right = targetIndex + offset;
+    if (left >= 0 && images[left] && images[left].complete && images[left].naturalWidth > 0) return images[left];
+    if (right < TOTAL_FRAMES && images[right] && images[right].complete && images[right].naturalWidth > 0) return images[right];
+  }
+  return null;
 }
 
 // Set up Fullscreen Canvas resolution
@@ -35,15 +52,15 @@ function resizeCanvas() {
   renderFrame(Math.floor(frameObj.frame));
 }
 
-// Draw 4K frame (3840x2160) perfectly centered & balanced scale so the mouse fills the viewport 100% cleanly
+// Draw 4K frame (3840x2160) perfectly centered & balanced scale
 function renderFrame(index) {
-  const img = images[index];
-  if (!img || !img.complete || img.naturalWidth === 0) return;
+  const img = getBestLoadedImage(index);
+  if (!img) return;
 
   const canvasWidth = canvas.width;
   const canvasHeight = canvas.height;
-  const imgWidth = img.naturalWidth;   // 3840
-  const imgHeight = img.naturalHeight; // 2160
+  const imgWidth = img.naturalWidth;
+  const imgHeight = img.naturalHeight;
 
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
@@ -63,44 +80,85 @@ function renderFrame(index) {
   ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
 }
 
-// Preload all 299 images
 let loadedCount = 0;
+let isAppRevealed = false;
 
-function preloadImages() {
+function revealApp() {
+  if (isAppRevealed) return;
+  isAppRevealed = true;
+  
+  if (loaderStatus) loaderStatus.innerText = 'System Ready!';
+  if (loaderBar) loaderBar.style.width = '100%';
+  if (loaderPercent) loaderPercent.innerText = '100%';
+
+  setTimeout(() => {
+    if (preloader) {
+      preloader.style.opacity = '0';
+      setTimeout(() => preloader.style.display = 'none', 600);
+    }
+  }, 200);
+}
+
+function preloadImagesProgressive() {
   return new Promise((resolve) => {
+    // Priority order: Keyframes first (0, 5, 10...), then remaining frames
+    const keyframeIndices = [];
+    const remainingIndices = [];
+
     for (let i = 0; i < TOTAL_FRAMES; i++) {
+      if (i % INITIAL_KEYFRAME_STEP === 0) {
+        keyframeIndices.push(i);
+      } else {
+        remainingIndices.push(i);
+      }
+    }
+
+    const loadQueue = [...keyframeIndices, ...remainingIndices];
+    let queuePointer = 0;
+
+    function fetchNext() {
+      if (queuePointer >= loadQueue.length) return;
+      
+      const frameIdx = loadQueue[queuePointer++];
       const img = new Image();
-      img.src = currentFrameUrl(i);
+      img.src = currentFrameUrl(frameIdx);
 
       img.onload = () => {
+        images[frameIdx] = img;
         loadedCount++;
-        const percent = Math.floor((loadedCount / TOTAL_FRAMES) * 100);
-        
-        if (loaderBar) loaderBar.style.width = `${percent}%`;
-        if (loaderPercent) loaderPercent.innerText = `${percent}%`;
-        
+
+        if (!isAppRevealed) {
+          const percent = Math.min(100, Math.floor((loadedCount / MIN_FRAMES_TO_START) * 100));
+          if (loaderBar) loaderBar.style.width = `${percent}%`;
+          if (loaderPercent) loaderPercent.innerText = `${percent}%`;
+        }
+
         if (loadedCount === 1) {
           resizeCanvas();
         }
 
-        if (loadedCount === TOTAL_FRAMES) {
-          if (loaderStatus) loaderStatus.innerText = 'Assets ready!';
-          setTimeout(() => {
-            if (preloader) {
-              preloader.style.opacity = '0';
-              setTimeout(() => preloader.style.display = 'none', 700);
-            }
-          }, 300);
+        // Reveal page instantly as soon as MIN_FRAMES_TO_START (15 keyframes) are ready!
+        if (loadedCount >= MIN_FRAMES_TO_START && !isAppRevealed) {
+          revealApp();
           resolve();
         }
+
+        fetchNext();
       };
 
       img.onerror = () => {
         loadedCount++;
-        if (loadedCount === TOTAL_FRAMES) resolve();
+        if (loadedCount >= MIN_FRAMES_TO_START && !isAppRevealed) {
+          revealApp();
+          resolve();
+        }
+        fetchNext();
       };
+    }
 
-      images.push(img);
+    // Launch parallel download workers
+    for (let w = 0; w < CONCURRENT_DOWNLOADS; w++) {
+      fetchNext();
     }
   });
 }
@@ -119,14 +177,13 @@ function initGSAPAnimation() {
   gsap.set([hud2, hud3, hud4], { autoAlpha: 0, scale: 0.92, y: 0 });
 
   // Master GSAP Scrub Timeline tied to ScrollTrigger
-  // Perfect 1:1 bidirectional scrubbing for BOTH Scroll DOWN and Scroll UP!
   const tl = gsap.timeline({
     scrollTrigger: {
       trigger: "#hero-pin",
       pin: true,
       start: "top top",
       end: "+=3500",
-      scrub: 0.5, // 0.5s smooth dampening for ultra-soft scroll inertia
+      scrub: 0.5,
       onUpdate: (self) => {
         renderFrame(Math.floor(frameObj.frame));
       }
@@ -385,9 +442,9 @@ if (resetBtn) {
 }
 
 // ----------------------------------------------------
-// INIT APP
+// INIT APP (INSTANT PROGRESSIVE REVEAL)
 // ----------------------------------------------------
-preloadImages().then(() => {
+preloadImagesProgressive().then(() => {
   initGSAPAnimation();
   initCoreSwitcher();
 });
