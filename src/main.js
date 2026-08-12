@@ -5,12 +5,10 @@ import './style.css';
 gsap.registerPlugin(ScrollTrigger);
 
 // ----------------------------------------------------
-// 1. PROGRESSIVE ASSET PRELOADER (INSTANT SUB-SECOND LOAD)
+// 1. REAL DATA ASSET PRELOADER (100% ACCURATE 299 FRAMES)
 // ----------------------------------------------------
 const TOTAL_FRAMES = 299;
-const INITIAL_KEYFRAME_STEP = 5; // Priority load keyframes (0, 5, 10, 15...)
-const MIN_FRAMES_TO_START = 15;  // Reveal page immediately when 15 keyframes are ready (~1 sec)
-const CONCURRENT_DOWNLOADS = 8;   // 8 parallel HTTP streams
+const CONCURRENT_DOWNLOADS = 12; // 12 parallel HTTP connections for fast loading
 
 const images = new Array(TOTAL_FRAMES);
 const frameObj = { frame: 0 };
@@ -28,12 +26,12 @@ function currentFrameUrl(index) {
   return `./bloody_mouse_30fps_4k_ultra_sharp/frame_${paddedNum}.jpg`;
 }
 
-// Fallback to nearest loaded frame so canvas never flickers or goes blank
+// Fallback safety to ensure canvas NEVER goes blank
 function getBestLoadedImage(targetIndex) {
   if (images[targetIndex] && images[targetIndex].complete && images[targetIndex].naturalWidth > 0) {
     return images[targetIndex];
   }
-  for (let offset = 1; offset < TOTAL_FRAMES; offset++) {
+  for (let offset = 0; offset < TOTAL_FRAMES; offset++) {
     const left = targetIndex - offset;
     const right = targetIndex + offset;
     if (left >= 0 && images[left] && images[left].complete && images[left].naturalWidth > 0) return images[left];
@@ -81,85 +79,70 @@ function renderFrame(index) {
 }
 
 let loadedCount = 0;
-let isAppRevealed = false;
 
-function revealApp() {
-  if (isAppRevealed) return;
-  isAppRevealed = true;
-  
-  if (loaderStatus) loaderStatus.innerText = 'System Ready!';
-  if (loaderBar) loaderBar.style.width = '100%';
-  if (loaderPercent) loaderPercent.innerText = '100%';
-
-  setTimeout(() => {
-    if (preloader) {
-      preloader.style.opacity = '0';
-      setTimeout(() => preloader.style.display = 'none', 600);
-    }
-  }, 200);
-}
-
-function preloadImagesProgressive() {
+function preloadImagesReal() {
   return new Promise((resolve) => {
-    // Priority order: Keyframes first (0, 5, 10...), then remaining frames
-    const keyframeIndices = [];
-    const remainingIndices = [];
+    // 1. Load Frame 0 FIRST so mouse is rendered immediately on screen
+    const frame0 = new Image();
+    frame0.src = currentFrameUrl(0);
 
-    for (let i = 0; i < TOTAL_FRAMES; i++) {
-      if (i % INITIAL_KEYFRAME_STEP === 0) {
-        keyframeIndices.push(i);
-      } else {
-        remainingIndices.push(i);
+    const onFrame0Done = (imgObj) => {
+      if (imgObj) images[0] = imgObj;
+      loadedCount = 1;
+      resizeCanvas(); // Render initial mouse frame immediately!
+
+      let queueIndex = 1;
+
+      function updateProgress() {
+        const percent = Math.floor((loadedCount / TOTAL_FRAMES) * 100);
+        if (loaderBar) loaderBar.style.width = `${percent}%`;
+        if (loaderPercent) loaderPercent.innerText = `${percent}%`;
+        if (loaderStatus) loaderStatus.innerText = `Loading frames (${loadedCount}/${TOTAL_FRAMES})...`;
+
+        if (loadedCount >= TOTAL_FRAMES) {
+          if (loaderStatus) loaderStatus.innerText = 'System Ready!';
+          setTimeout(() => {
+            if (preloader) {
+              preloader.style.opacity = '0';
+              setTimeout(() => preloader.style.display = 'none', 600);
+            }
+            resolve();
+          }, 300);
+        }
       }
-    }
 
-    const loadQueue = [...keyframeIndices, ...remainingIndices];
-    let queuePointer = 0;
+      function fetchNext() {
+        if (queueIndex >= TOTAL_FRAMES) return;
+        const idx = queueIndex++;
 
-    function fetchNext() {
-      if (queuePointer >= loadQueue.length) return;
-      
-      const frameIdx = loadQueue[queuePointer++];
-      const img = new Image();
-      img.src = currentFrameUrl(frameIdx);
+        const img = new Image();
+        img.src = currentFrameUrl(idx);
 
-      img.onload = () => {
-        images[frameIdx] = img;
-        loadedCount++;
+        img.onload = () => {
+          images[idx] = img;
+          loadedCount++;
+          updateProgress();
+          fetchNext();
+        };
 
-        if (!isAppRevealed) {
-          const percent = Math.min(100, Math.floor((loadedCount / MIN_FRAMES_TO_START) * 100));
-          if (loaderBar) loaderBar.style.width = `${percent}%`;
-          if (loaderPercent) loaderPercent.innerText = `${percent}%`;
-        }
+        img.onerror = () => {
+          loadedCount++;
+          updateProgress();
+          fetchNext();
+        };
+      }
 
-        if (loadedCount === 1) {
-          resizeCanvas();
-        }
+      // Initial progress update
+      updateProgress();
 
-        // Reveal page instantly as soon as MIN_FRAMES_TO_START (15 keyframes) are ready!
-        if (loadedCount >= MIN_FRAMES_TO_START && !isAppRevealed) {
-          revealApp();
-          resolve();
-        }
-
+      // Launch 12 parallel HTTP stream workers
+      for (let w = 0; w < CONCURRENT_DOWNLOADS; w++) {
         fetchNext();
-      };
+      }
+    };
 
-      img.onerror = () => {
-        loadedCount++;
-        if (loadedCount >= MIN_FRAMES_TO_START && !isAppRevealed) {
-          revealApp();
-          resolve();
-        }
-        fetchNext();
-      };
-    }
-
-    // Launch parallel download workers
-    for (let w = 0; w < CONCURRENT_DOWNLOADS; w++) {
-      fetchNext();
-    }
+    frame0.onload = () => onFrame0Done(frame0);
+    frame0.onerror = () => onFrame0Done(null);
   });
 }
 
@@ -442,9 +425,9 @@ if (resetBtn) {
 }
 
 // ----------------------------------------------------
-// INIT APP (INSTANT PROGRESSIVE REVEAL)
+// INIT APP (REAL DATA 299 FRAMES PRELOADER)
 // ----------------------------------------------------
-preloadImagesProgressive().then(() => {
+preloadImagesReal().then(() => {
   initGSAPAnimation();
   initCoreSwitcher();
 });
