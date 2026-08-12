@@ -23,7 +23,7 @@ const ctx = canvas.getContext('2d');
 
 function currentFrameUrl(index) {
   const paddedNum = String(index + 1).padStart(4, '0');
-  return `./bloody_mouse_30fps_4k_ultra_sharp/frame_${paddedNum}.jpg`;
+  return `/bloody_mouse_30fps_4k_ultra_sharp/frame_${paddedNum}.jpg`;
 }
 
 // Fallback safety to ensure canvas NEVER goes blank
