@@ -5,10 +5,11 @@ import './style.css';
 gsap.registerPlugin(ScrollTrigger);
 
 // ----------------------------------------------------
-// 1. REAL DATA ASSET PRELOADER (100% ACCURATE 299 FRAMES)
+// 1. TIERED KEYFRAME PRELOADER & FULL-BLEED COVER CANVAS
 // ----------------------------------------------------
 const TOTAL_FRAMES = 299;
-const CONCURRENT_DOWNLOADS = 12; // 12 parallel HTTP connections for fast loading
+const KEYFRAME_STEP = 5; // Preload 60 keyframes (~54MB) during initial loader for 1-3s ultra-fast startup!
+const CONCURRENT_DOWNLOADS = 10; // Parallel HTTP streams
 
 const images = new Array(TOTAL_FRAMES);
 const frameObj = { frame: 0 };
@@ -26,21 +27,22 @@ function currentFrameUrl(index) {
   return `/bloody_mouse_30fps_4k_ultra_sharp/frame_${paddedNum}.jpg`;
 }
 
-// Fallback safety to ensure canvas NEVER goes blank
+// Fast bidirectional search for nearest loaded frame (Zero blank gaps!)
 function getBestLoadedImage(targetIndex) {
-  if (images[targetIndex] && images[targetIndex].complete && images[targetIndex].naturalWidth > 0) {
-    return images[targetIndex];
+  const idx = Math.max(0, Math.min(TOTAL_FRAMES - 1, Math.floor(targetIndex)));
+  if (images[idx] && images[idx].complete && images[idx].naturalWidth > 0) {
+    return images[idx];
   }
-  for (let offset = 0; offset < TOTAL_FRAMES; offset++) {
-    const left = targetIndex - offset;
-    const right = targetIndex + offset;
+  for (let offset = 1; offset < TOTAL_FRAMES; offset++) {
+    const left = idx - offset;
+    const right = idx + offset;
     if (left >= 0 && images[left] && images[left].complete && images[left].naturalWidth > 0) return images[left];
     if (right < TOTAL_FRAMES && images[right] && images[right].complete && images[right].naturalWidth > 0) return images[right];
   }
   return null;
 }
 
-// Set up Fullscreen Canvas resolution
+// Set up Fullscreen Canvas resolution with DPR support
 function resizeCanvas() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   
@@ -50,7 +52,7 @@ function resizeCanvas() {
   renderFrame(Math.floor(frameObj.frame));
 }
 
-// Draw 4K frame (3840x2160) perfectly centered & balanced scale
+// Draw 4K frame (3840x2160) - Full-Bleed 100% Viewport Cover Mode
 function renderFrame(index) {
   const img = getBestLoadedImage(index);
   if (!img) return;
@@ -62,16 +64,16 @@ function renderFrame(index) {
 
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-  // Fit 16:9 4K frame to screen perfectly
+  // Full-bleed Cover Mode (Fill 100% screen edge-to-edge without letterboxing)
   const scaleX = canvasWidth / imgWidth;
   const scaleY = canvasHeight / imgHeight;
   
-  const scale = Math.min(scaleX, scaleY) * 1.15;
+  const scale = Math.max(scaleX, scaleY);
 
   const drawWidth = imgWidth * scale;
   const drawHeight = imgHeight * scale;
 
-  // Perfectly centered on canvas
+  // Center mouse frame in hero container
   const offsetX = (canvasWidth - drawWidth) / 2;
   const offsetY = (canvasHeight - drawHeight) / 2;
 
@@ -102,7 +104,6 @@ function preventScrollEvent(e) {
 window.addEventListener('wheel', preventScrollEvent, { passive: false });
 window.addEventListener('touchmove', preventScrollEvent, { passive: false });
 
-let loadedCount = 0;
 let highestPercent = 0;
 
 function preloadImagesReal() {
@@ -115,6 +116,7 @@ function preloadImagesReal() {
 
       if (loaderBar) loaderBar.style.width = '100%';
       if (loaderPercent) loaderPercent.innerText = '100%';
+      if (loaderStatus) loaderStatus.innerText = 'HARDWARE READY!';
 
       setTimeout(() => {
         if (preloader) {
@@ -131,82 +133,125 @@ function preloadImagesReal() {
       }, 300);
     }
 
+    // Build keyframe list (Step = 5: 0, 5, 10, ... 295, 298)
+    const keyframes = [];
+    for (let i = 0; i < TOTAL_FRAMES; i += KEYFRAME_STEP) {
+      keyframes.push(i);
+    }
+    if (!keyframes.includes(TOTAL_FRAMES - 1)) {
+      keyframes.push(TOTAL_FRAMES - 1);
+    }
+
+    let loadedKeyframesCount = 0;
+
+    function updateProgress() {
+      const calculatedPercent = Math.floor((loadedKeyframesCount / keyframes.length) * 100);
+      if (calculatedPercent > highestPercent) {
+        highestPercent = Math.min(100, calculatedPercent);
+      }
+
+      if (loaderBar) loaderBar.style.width = `${highestPercent}%`;
+      if (loaderPercent) loaderPercent.innerText = `${highestPercent}%`;
+      if (loaderStatus && highestPercent < 100) {
+        loaderStatus.innerText = `MEMUAT MESH 3D (${highestPercent}%)...`;
+      }
+
+      if (loadedKeyframesCount >= keyframes.length) {
+        finishPreload();
+      }
+    }
+
     // 1. Load Frame 0 FIRST so mouse is rendered immediately on screen
     const frame0 = new Image();
     frame0.src = currentFrameUrl(0);
 
     const onFrame0Done = (imgObj) => {
       if (imgObj) images[0] = imgObj;
-      loadedCount = 1;
-      resizeCanvas(); // Render initial mouse frame immediately!
+      loadedKeyframesCount = 1;
+      resizeCanvas(); // Render initial mouse frame immediately on canvas!
 
-      let queueIndex = 1;
+      let keyframeQueueIdx = 1; // start from 2nd keyframe since index 0 is done
 
-      function updateProgress() {
-        const calculatedPercent = Math.floor((loadedCount / TOTAL_FRAMES) * 100);
-        // Guarantee percentage STAYS STUCK or moves FORWARD, never starts over or goes backward!
-        if (calculatedPercent > highestPercent) {
-          highestPercent = calculatedPercent;
-        }
+      function fetchNextKeyframe() {
+        if (keyframeQueueIdx >= keyframes.length) return;
+        const frameIdx = keyframes[keyframeQueueIdx++];
 
-        if (loaderBar) loaderBar.style.width = `${highestPercent}%`;
-        if (loaderPercent) loaderPercent.innerText = `${highestPercent}%`;
-
-        if (loadedCount >= TOTAL_FRAMES) {
-          finishPreload();
-        }
-      }
-
-      function fetchNext() {
-        if (queueIndex >= TOTAL_FRAMES) return;
-        const idx = queueIndex++;
-
-        function loadSingleFrame(retries = 2) {
+        function loadSingleKeyframe(retries = 2) {
           const img = new Image();
-          img.src = currentFrameUrl(idx);
+          img.src = currentFrameUrl(frameIdx);
 
           img.onload = () => {
-            images[idx] = img;
-            loadedCount++;
+            images[frameIdx] = img;
+            loadedKeyframesCount++;
+            if (frameIdx === 0) resizeCanvas();
             updateProgress();
-            fetchNext();
+            fetchNextKeyframe();
           };
 
           img.onerror = () => {
             if (retries > 0) {
-              // Retry fetching frame after 300ms delay without losing progress bar state
-              setTimeout(() => loadSingleFrame(retries - 1), 300);
+              setTimeout(() => loadSingleKeyframe(retries - 1), 200);
             } else {
-              // Max retries reached, count as completed to prevent preloader hang
-              loadedCount++;
+              loadedKeyframesCount++;
               updateProgress();
-              fetchNext();
+              fetchNextKeyframe();
             }
           };
         }
 
-        loadSingleFrame();
+        loadSingleKeyframe();
       }
 
-      // Initial progress update
       updateProgress();
 
-      // Launch 12 parallel HTTP stream workers
+      // Launch parallel HTTP stream workers for keyframes
       for (let w = 0; w < CONCURRENT_DOWNLOADS; w++) {
-        fetchNext();
+        fetchNextKeyframe();
       }
 
-      // Safety fallback: If network freezes, force finish after 15s so user is never locked out
+      // Safety fallback: Force finish after 6s max so user is NEVER stuck on loading page
       setTimeout(() => {
         if (!preloaderFinished) {
-          loadedCount = TOTAL_FRAMES;
+          loadedKeyframesCount = keyframes.length;
           finishPreload();
         }
-      }, 15000);
+      }, 6000);
     };
 
     frame0.onload = () => onFrame0Done(frame0);
     frame0.onerror = () => onFrame0Done(null);
+  }).then(() => {
+    // ----------------------------------------------------
+    // PHASE 2: BACKGROUND STREAMER (Load remaining non-keyframes silently)
+    // ----------------------------------------------------
+    const nonKeyframeQueue = [];
+    for (let i = 0; i < TOTAL_FRAMES; i++) {
+      if (!images[i]) {
+        nonKeyframeQueue.push(i);
+      }
+    }
+
+    let bgIdx = 0;
+    const bgWorkers = 4; // Low-intensity background workers so scroll stays 60fps
+
+    function fetchNextBgFrame() {
+      if (bgIdx >= nonKeyframeQueue.length) return;
+      const frameIdx = nonKeyframeQueue[bgIdx++];
+
+      const img = new Image();
+      img.src = currentFrameUrl(frameIdx);
+      img.onload = () => {
+        images[frameIdx] = img;
+        fetchNextBgFrame();
+      };
+      img.onerror = () => {
+        fetchNextBgFrame();
+      };
+    }
+
+    for (let w = 0; w < bgWorkers; w++) {
+      fetchNextBgFrame();
+    }
   });
 }
 
