@@ -40,27 +40,21 @@
 
   <!-- Preloader Screen -->
   <div id="preloader" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-obsidian text-white transition-opacity duration-700">
-    <div class="relative flex flex-col items-center max-w-md w-full px-6 text-center">
+    <div class="relative flex flex-col items-center max-w-xs w-full px-6 text-center space-y-6">
       <!-- Official Bloody Handprint Logo -->
-      <div class="relative mb-6">
+      <div class="relative">
         <div class="absolute -inset-6 rounded-full bg-crimson/30 blur-2xl animate-pulse"></div>
-        <img src="/bloody-logo.png" alt="Bloody Logo" class="relative w-20 h-20 object-contain drop-shadow-[0_0_25px_rgba(255,15,57,0.9)] animate-bounce" />
+        <img src="/bloody-logo.png" alt="Bloody Logo" class="relative w-24 h-24 object-contain drop-shadow-[0_0_25px_rgba(255,15,57,0.9)] animate-bounce" />
       </div>
 
-      <h2 class="text-2xl font-bold tracking-wider font-display text-white mb-2 uppercase">
-        INITIALIZING <span class="text-crimson">BLOODY A70</span>
-      </h2>
-      <p class="text-xs text-slate-400 font-mono mb-6 uppercase tracking-widest">
-        Loading Fullscreen 4K Frames...
-      </p>
-
-      <!-- Progress Bar Outer -->
-      <div class="w-full h-2.5 bg-slate-900 rounded-full overflow-hidden p-0.5 border border-slate-800 relative">
-        <div id="loader-bar" class="h-full bg-gradient-to-r from-crimson-dark via-crimson to-red-400 rounded-full w-0 transition-all duration-150 shadow-[0_0_12px_#ff0f39]"></div>
-      </div>
-      <div class="flex justify-between w-full mt-2 font-mono text-xs text-slate-400">
-        <span id="loader-status">Loading assets...</span>
-        <span id="loader-percent" class="text-crimson font-bold">0%</span>
+      <!-- Progress Bar Outer & Percentage -->
+      <div class="w-full space-y-2">
+        <div class="w-full h-2 bg-slate-900 rounded-full overflow-hidden p-0.5 border border-slate-800 relative">
+          <div id="loader-bar" class="h-full bg-gradient-to-r from-crimson-dark via-crimson to-red-400 rounded-full w-0 transition-all duration-150 shadow-[0_0_12px_#ff0f39]"></div>
+        </div>
+        <div class="text-center font-mono">
+          <span id="loader-percent" class="text-crimson font-extrabold text-lg tracking-wider">0%</span>
+        </div>
       </div>
     </div>
   </div>

@@ -97,10 +97,8 @@ function preloadImagesReal() {
         const percent = Math.floor((loadedCount / TOTAL_FRAMES) * 100);
         if (loaderBar) loaderBar.style.width = `${percent}%`;
         if (loaderPercent) loaderPercent.innerText = `${percent}%`;
-        if (loaderStatus) loaderStatus.innerText = `Loading frames (${loadedCount}/${TOTAL_FRAMES})...`;
 
         if (loadedCount >= TOTAL_FRAMES) {
-          if (loaderStatus) loaderStatus.innerText = 'System Ready!';
           setTimeout(() => {
             if (preloader) {
               preloader.style.opacity = '0';
