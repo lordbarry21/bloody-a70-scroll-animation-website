@@ -78,10 +78,59 @@ function renderFrame(index) {
   ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
 }
 
+// ----------------------------------------------------
+// SCROLL LOCK DURING PRELOADER
+// ----------------------------------------------------
+function lockScroll() {
+  document.body.classList.add('overflow-hidden');
+  document.documentElement.classList.add('overflow-hidden');
+}
+
+function unlockScroll() {
+  document.body.classList.remove('overflow-hidden');
+  document.documentElement.classList.remove('overflow-hidden');
+}
+
+// Lock scroll immediately on page initialization
+lockScroll();
+
+function preventScrollEvent(e) {
+  if (preloader && preloader.style.display !== 'none') {
+    e.preventDefault();
+  }
+}
+window.addEventListener('wheel', preventScrollEvent, { passive: false });
+window.addEventListener('touchmove', preventScrollEvent, { passive: false });
+
 let loadedCount = 0;
+let highestPercent = 0;
 
 function preloadImagesReal() {
   return new Promise((resolve) => {
+    let preloaderFinished = false;
+
+    function finishPreload() {
+      if (preloaderFinished) return;
+      preloaderFinished = true;
+
+      if (loaderBar) loaderBar.style.width = '100%';
+      if (loaderPercent) loaderPercent.innerText = '100%';
+
+      setTimeout(() => {
+        if (preloader) {
+          preloader.style.opacity = '0';
+          setTimeout(() => {
+            preloader.style.display = 'none';
+            unlockScroll(); // Unlock page scrolling ONLY when preloader is hidden!
+            window.scrollTo(0, 0);
+          }, 600);
+        } else {
+          unlockScroll();
+        }
+        resolve();
+      }, 300);
+    }
+
     // 1. Load Frame 0 FIRST so mouse is rendered immediately on screen
     const frame0 = new Image();
     frame0.src = currentFrameUrl(0);
@@ -94,18 +143,17 @@ function preloadImagesReal() {
       let queueIndex = 1;
 
       function updateProgress() {
-        const percent = Math.floor((loadedCount / TOTAL_FRAMES) * 100);
-        if (loaderBar) loaderBar.style.width = `${percent}%`;
-        if (loaderPercent) loaderPercent.innerText = `${percent}%`;
+        const calculatedPercent = Math.floor((loadedCount / TOTAL_FRAMES) * 100);
+        // Guarantee percentage STAYS STUCK or moves FORWARD, never starts over or goes backward!
+        if (calculatedPercent > highestPercent) {
+          highestPercent = calculatedPercent;
+        }
+
+        if (loaderBar) loaderBar.style.width = `${highestPercent}%`;
+        if (loaderPercent) loaderPercent.innerText = `${highestPercent}%`;
 
         if (loadedCount >= TOTAL_FRAMES) {
-          setTimeout(() => {
-            if (preloader) {
-              preloader.style.opacity = '0';
-              setTimeout(() => preloader.style.display = 'none', 600);
-            }
-            resolve();
-          }, 300);
+          finishPreload();
         }
       }
 
@@ -113,21 +161,31 @@ function preloadImagesReal() {
         if (queueIndex >= TOTAL_FRAMES) return;
         const idx = queueIndex++;
 
-        const img = new Image();
-        img.src = currentFrameUrl(idx);
+        function loadSingleFrame(retries = 2) {
+          const img = new Image();
+          img.src = currentFrameUrl(idx);
 
-        img.onload = () => {
-          images[idx] = img;
-          loadedCount++;
-          updateProgress();
-          fetchNext();
-        };
+          img.onload = () => {
+            images[idx] = img;
+            loadedCount++;
+            updateProgress();
+            fetchNext();
+          };
 
-        img.onerror = () => {
-          loadedCount++;
-          updateProgress();
-          fetchNext();
-        };
+          img.onerror = () => {
+            if (retries > 0) {
+              // Retry fetching frame after 300ms delay without losing progress bar state
+              setTimeout(() => loadSingleFrame(retries - 1), 300);
+            } else {
+              // Max retries reached, count as completed to prevent preloader hang
+              loadedCount++;
+              updateProgress();
+              fetchNext();
+            }
+          };
+        }
+
+        loadSingleFrame();
       }
 
       // Initial progress update
@@ -137,6 +195,14 @@ function preloadImagesReal() {
       for (let w = 0; w < CONCURRENT_DOWNLOADS; w++) {
         fetchNext();
       }
+
+      // Safety fallback: If network freezes, force finish after 15s so user is never locked out
+      setTimeout(() => {
+        if (!preloaderFinished) {
+          loadedCount = TOTAL_FRAMES;
+          finishPreload();
+        }
+      }, 15000);
     };
 
     frame0.onload = () => onFrame0Done(frame0);
